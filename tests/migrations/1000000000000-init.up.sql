@@ -1,0 +1,1 @@
+CREATE TABLE "widget" ("id" SERIAL PRIMARY KEY);
