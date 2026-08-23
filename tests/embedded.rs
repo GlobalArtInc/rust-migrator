@@ -13,9 +13,25 @@ fn the_pairs_are_read_in_order_of_their_stamp() {
         [
             "Init1000000000000",
             "AddWidgetName1000000000001",
-            "WidgetNameIndex1000000000002"
+            "WidgetNameIndex1000000000002",
+            "Db101000000000003",
+            "Db91000000000003",
         ]
     );
+}
+
+#[test]
+fn files_that_share_a_stamp_keep_one_order_between_them() {
+    // typeorm ordered by the stamp alone and let the directory listing settle the
+    // ties; three of the wfs migrations were stamped in the same millisecond
+    let carried = MIGRATIONS.all().expect("the migrations are readable");
+    let tied: Vec<&str> = carried
+        .iter()
+        .filter(|migration| migration.stamp == 1000000000003)
+        .map(|migration| migration.name.as_str())
+        .collect();
+
+    assert_eq!(tied, ["Db101000000000003", "Db91000000000003"]);
 }
 
 #[test]

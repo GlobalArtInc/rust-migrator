@@ -17,8 +17,8 @@ pub enum Error {
     #[error("{file} is not utf-8")]
     Encoding { file: String },
 
-    #[error("{name} and {other} share the timestamp {stamp}, so one of them would never be seen")]
-    Duplicate { name: String, other: String, stamp: i64 },
+    #[error("two files resolve to {name}, so the ledger could not tell them apart")]
+    Duplicate { name: String },
 
     #[error("{name} carries no down.sql, so it cannot be taken back")]
     Irreversible { name: String },

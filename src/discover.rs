@@ -79,14 +79,15 @@ pub(crate) fn all(dir: &'static Dir<'static>) -> Result<Vec<Migration>> {
         });
     }
 
-    found.sort_by_key(|migration| migration.stamp);
+    // typeorm ordered by the stamp alone and let the directory listing settle the
+    // ties, which happened to be by name; two files that resolve to one name are
+    // the real trouble, because the ledger cannot tell them apart
+    found.sort_by(|left, right| left.stamp.cmp(&right.stamp).then_with(|| left.name.cmp(&right.name)));
 
     for pair in found.windows(2) {
-        if pair[0].stamp == pair[1].stamp {
+        if pair[0].name == pair[1].name {
             return Err(Error::Duplicate {
                 name: pair[0].name.clone(),
-                other: pair[1].name.clone(),
-                stamp: pair[0].stamp,
             });
         }
     }

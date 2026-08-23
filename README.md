@@ -70,6 +70,10 @@ part gets a capital and nothing else is touched. `workspace-member` and
 `WorkspaceMember` both become `WorkspaceMember1748693000572`, which is the name
 already sitting in the table.
 
+Two files stamped in the same millisecond keep one order between them, by name,
+which is the order the directory listing gave TypeORM. Two files that resolve to
+the same name are refused: the ledger could not tell them apart.
+
 `migrator create add-billing-plan` writes the pair, stamped in milliseconds the
 way TypeORM stamped them, so the two histories sort into one.
 
