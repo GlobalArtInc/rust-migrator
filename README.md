@@ -9,7 +9,14 @@ keeps.
 
 ```toml
 [dependencies]
-migrator = { git = "https://github.com/GlobalArtInc/rust-migrator" }
+migrator = { package = "sqlmig", version = "0.1" }
+```
+
+The crate is `sqlmig` on crates.io; `migrator` is what it is called at the call
+site, which is what the examples below use. Straight from here works too:
+
+```toml
+migrator = { package = "sqlmig", git = "https://github.com/GlobalArtInc/rust-migrator" }
 ```
 
 ## In a service

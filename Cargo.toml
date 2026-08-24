@@ -1,5 +1,5 @@
 [package]
-name = "migrator"
+name = "sqlmig"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.94"
@@ -8,6 +8,7 @@ license = "ISC"
 repository = "https://github.com/GlobalArtInc/rust-migrator"
 readme = "README.md"
 keywords = ["migrations", "postgres", "sea-orm", "typeorm"]
+documentation = "https://docs.rs/sqlmig"
 categories = ["database"]
 
 [dependencies]

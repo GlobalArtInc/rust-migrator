@@ -6,10 +6,10 @@
 //! MIGRATOR_TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5433/postgres cargo test
 //! ```
 
-use migrator::{Checksum, Marking, Migrations};
 use sea_orm::{ConnectionTrait, Database, DatabaseConnection, Statement};
+use sqlmig::{Checksum, Marking, Migrations};
 
-static MIGRATIONS: Migrations = migrator::embed!("$CARGO_MANIFEST_DIR/tests/migrations");
+static MIGRATIONS: Migrations = sqlmig::embed!("$CARGO_MANIFEST_DIR/tests/migrations");
 
 async fn database() -> Option<DatabaseConnection> {
     let url = std::env::var("MIGRATOR_TEST_DATABASE_URL").ok()?;
@@ -159,7 +159,7 @@ async fn an_edited_file_is_reported_and_a_missing_one_is_too() {
 async fn the_ledger_can_be_told_to_live_somewhere_else() {
     let Some(db) = database().await else { return };
 
-    let mine = migrator::embed!("$CARGO_MANIFEST_DIR/tests/migrations").table("mine");
+    let mine = sqlmig::embed!("$CARGO_MANIFEST_DIR/tests/migrations").table("mine");
 
     mine.apply(&db).await.expect("the schema goes up");
 

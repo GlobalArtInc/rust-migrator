@@ -1,7 +1,7 @@
 //! The names a build hands the ledger are the names typeorm wrote, and the file
 //! that asks to run outside a transaction is the only one that does.
 
-static MIGRATIONS: migrator::Migrations = migrator::embed!("$CARGO_MANIFEST_DIR/tests/migrations");
+static MIGRATIONS: sqlmig::Migrations = sqlmig::embed!("$CARGO_MANIFEST_DIR/tests/migrations");
 
 #[test]
 fn the_pairs_are_read_in_order_of_their_stamp() {

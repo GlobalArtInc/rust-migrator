@@ -1,0 +1,19 @@
+# Публикация в crates.io. Версия берётся из Cargo.toml, тег - только повод.
+name: Публикация
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        type: boolean
+        default: true
+        description: "Собрать и проверить пакет, не публикуя."
+
+jobs:
+  publish:
+    uses: GlobalArtInc/ci-cd/.github/workflows/cargo-publish.yml@master
+    with:
+      dry_run: ${{ inputs.dry_run || false }}
+    secrets: inherit
