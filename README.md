@@ -31,7 +31,13 @@ service against a half-built schema answers wrongly rather than not at all.
 static MIGRATIONS: migrator::Migrations = migrator::embed!("$CARGO_MANIFEST_DIR/../../migrations");
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> std::process::ExitCode {
+    telemetry::init("migrator", DeployEnv::from_env());
+
+    migrator::cli::report(run().await)
+}
+
+async fn run() -> anyhow::Result<()> {
     let command = migrator::cli::command()?;
     let db = match command.needs_database() {
         true => Some(database::connect(&DatabaseConfig::from_env()?).await?),
@@ -41,6 +47,12 @@ async fn main() -> anyhow::Result<()> {
     Ok(command.run(&MIGRATIONS, db.as_ref()).await?)
 }
 ```
+
+Everything the binary has to say goes through `tracing`, including what went
+wrong — a job's output is read by a machine, and one plain line in the middle of
+a stream of json is a line nobody sees. `report` turns the outcome into an exit
+code and logs the error through the same subscriber. Only `help` writes plainly,
+because nothing but a person ever asks for it.
 
 ```
 migrator status                  what the binary carries and what the database has

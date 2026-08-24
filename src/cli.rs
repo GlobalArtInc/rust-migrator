@@ -1,6 +1,8 @@
 //! The hand-run side: what is left once the services apply their own migrations
 //! on the way up.
 
+use std::process::ExitCode;
+
 use sea_orm::DatabaseConnection;
 
 use crate::error::{Error, Result};
@@ -113,7 +115,7 @@ impl Command {
                 .as_millis() as i64;
 
             for path in migrations.create(slug, stamp)? {
-                println!("{}", path.display());
+                tracing::info!(path = %path.display(), "wrote a migration");
             }
 
             return Ok(());
@@ -129,10 +131,8 @@ impl Command {
                     return plan(migrations, db, target.as_deref()).await;
                 }
 
-                match migrations.apply_through(db, target.as_deref()).await?.len() {
-                    0 => println!("nothing to apply"),
-                    applied => println!("applied {applied}"),
-                }
+                // the library logs each one as it goes, and the count when it is done
+                migrations.apply_through(db, target.as_deref()).await?;
 
                 Ok(())
             }
@@ -141,22 +141,18 @@ impl Command {
                     return plan_down(migrations, db, *steps).await;
                 }
 
-                for name in migrations.revert(db, *steps).await? {
-                    println!("reverted {name}");
-                }
+                migrations.revert(db, *steps).await?;
 
                 Ok(())
             }
             Command::Mark { target } => {
-                for name in migrations.mark(db, target.as_deref()).await? {
-                    println!("marked {name}");
-                }
+                migrations.mark(db, target.as_deref()).await?;
 
                 Ok(())
             }
             Command::Unmark { name } => {
                 migrations.unmark(db, name).await?;
-                println!("forgot {name}");
+                tracing::info!(migration = name, "dropped the ledger row");
 
                 Ok(())
             }
@@ -169,29 +165,25 @@ async fn status(migrations: &Migrations, db: &DatabaseConnection) -> Result<()> 
     let status = migrations.status(db).await?;
 
     for entry in &status.entries {
-        let state = if entry.applied { "applied" } else { "pending" };
-        let mut notes = Vec::new();
-        if entry.checksum == Checksum::Drift {
-            notes.push("edited since it ran");
-        }
-        if entry.checksum == Checksum::Unrecorded {
-            notes.push("applied before this tool");
-        }
-        if !entry.reversible {
-            notes.push("no down");
-        }
-
-        match notes.is_empty() {
-            true => println!("{state}  {}", entry.name),
-            false => println!("{state}  {}  ({})", entry.name, notes.join(", ")),
-        }
+        tracing::info!(
+            migration = entry.name,
+            state = if entry.applied { "applied" } else { "pending" },
+            checksum = match entry.checksum {
+                Checksum::Match => "match",
+                Checksum::Drift => "edited since it ran",
+                Checksum::Unrecorded => "applied before this tool",
+                Checksum::NotApplied => "not applied",
+            },
+            reversible = entry.reversible,
+            "migration"
+        );
     }
 
-    if !status.unknown.is_empty() {
-        println!("\nrecorded in the database but not carried by this build:");
-        for name in &status.unknown {
-            println!("  {name}");
-        }
+    for name in &status.unknown {
+        tracing::warn!(
+            migration = name,
+            "recorded in the database but not carried by this build"
+        );
     }
 
     Ok(())
@@ -207,7 +199,10 @@ async fn verify(migrations: &Migrations, db: &DatabaseConnection) -> Result<()> 
         .collect();
 
     if drifted.is_empty() {
-        println!("every applied migration is the file that ran");
+        tracing::info!(
+            checked = status.entries.len(),
+            "every applied migration is the file that ran"
+        );
         return Ok(());
     }
 
@@ -231,8 +226,7 @@ async fn plan(migrations: &Migrations, db: &DatabaseConnection, target: Option<&
             continue;
         }
 
-        println!("-- {}", migration.name);
-        println!("{}", migration.up.trim_end());
+        tracing::info!(migration = migration.name, sql = migration.up.trim_end(), "would apply");
 
         if target == Some(migration.name.as_str()) {
             break;
@@ -256,9 +250,22 @@ async fn plan_down(migrations: &Migrations, db: &DatabaseConnection, steps: usiz
             });
         };
 
-        println!("-- {}", migration.name);
-        println!("{}", down.trim_end());
+        tracing::info!(migration = migration.name, sql = down.trim_end(), "would revert");
     }
 
     Ok(())
+}
+
+/// Turns the outcome into an exit code, saying what went wrong through the same
+/// subscriber as everything else: a job's output is read by a machine, and one
+/// plain line in the middle of a stream of json is a line nobody sees.
+pub fn report<E: std::fmt::Display>(result: std::result::Result<(), E>) -> ExitCode {
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            tracing::error!(error = %error, "the migrator stopped");
+
+            ExitCode::FAILURE
+        }
+    }
 }
