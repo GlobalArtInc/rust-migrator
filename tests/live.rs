@@ -6,7 +6,7 @@
 //! MIGRATOR_TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5433/postgres cargo test
 //! ```
 
-use migrator::{Checksum, Migrations};
+use migrator::{Checksum, Marking, Migrations};
 use sea_orm::{ConnectionTrait, Database, DatabaseConnection, Statement};
 
 static MIGRATIONS: Migrations = migrator::embed!("$CARGO_MANIFEST_DIR/tests/migrations");
@@ -44,15 +44,23 @@ async fn a_schema_goes_up_and_comes_back_down() {
     let Some(db) = database().await else { return };
 
     let applied = MIGRATIONS.apply(&db).await.expect("the schema goes up");
-    assert_eq!(applied.len(), 3);
+    assert_eq!(applied.len(), 5);
     assert_eq!(columns(&db, "widget").await, ["id", "name"]);
 
     // the second run finds nothing left, which is what every replica after the
     // first one does on the way up
     assert!(MIGRATIONS.apply(&db).await.expect("a second run is quiet").is_empty());
 
-    let reverted = MIGRATIONS.revert(&db, 2).await.expect("two come back down");
-    assert_eq!(reverted, ["WidgetNameIndex1000000000002", "AddWidgetName1000000000001"]);
+    let reverted = MIGRATIONS.revert(&db, 4).await.expect("four come back down");
+    assert_eq!(
+        reverted,
+        [
+            "Db91000000000003",
+            "Db101000000000003",
+            "WidgetNameIndex1000000000002",
+            "AddWidgetName1000000000001"
+        ]
+    );
     assert_eq!(columns(&db, "widget").await, ["id"]);
 }
 
@@ -70,7 +78,7 @@ async fn the_ledger_is_the_table_typeorm_wrote() {
         .await
         .expect("the ledger is readable");
 
-    assert_eq!(rows.len(), 3);
+    assert_eq!(rows.len(), 5);
     assert_eq!(rows[0].try_get::<i64>("", "timestamp").unwrap(), 1000000000000);
     assert_eq!(rows[0].try_get::<String>("", "name").unwrap(), "Init1000000000000");
     assert!(
@@ -89,14 +97,38 @@ async fn a_schema_that_already_has_the_change_is_marked_rather_than_run() {
         .expect("the table is created by hand");
 
     let marked = MIGRATIONS
-        .mark(&db, Some("Init1000000000000"))
+        .mark(&db, Marking::One("Init1000000000000"))
         .await
         .expect("the first is marked");
     assert_eq!(marked, ["Init1000000000000"]);
 
     // and the rest go up over it without tripping on the table that is there
     let applied = MIGRATIONS.apply(&db).await.expect("the rest go up");
-    assert_eq!(applied.len(), 2);
+    assert_eq!(applied.len(), 4);
+}
+
+#[tokio::test]
+async fn a_history_that_was_never_written_down_is_marked_up_to_a_point() {
+    let Some(db) = database().await else { return };
+
+    // the schema is there, the ledger is not: mark everything the database is
+    // known to have and leave the rest to be applied
+    let marked = MIGRATIONS
+        .mark(&db, Marking::Through("AddWidgetName1000000000001"))
+        .await
+        .expect("the first two are marked");
+
+    assert_eq!(marked, ["Init1000000000000", "AddWidgetName1000000000001"]);
+
+    let status = MIGRATIONS.status(&db).await.expect("the status is readable");
+    let pending: Vec<&str> = status
+        .entries
+        .iter()
+        .filter(|entry| !entry.applied)
+        .map(|entry| entry.name.as_str())
+        .collect();
+
+    assert_eq!(pending.len(), 3, "everything after the mark is still to be applied");
 }
 
 #[tokio::test]
@@ -138,5 +170,5 @@ async fn the_ledger_can_be_told_to_live_somewhere_else() {
         ))
         .await
         .expect("the named ledger is readable");
-    assert_eq!(rows.len(), 3);
+    assert_eq!(rows.len(), 5);
 }

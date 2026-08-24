@@ -109,9 +109,11 @@ somebody built by hand, or one where the history was lost while the rows stayed 
 a rewritten service usually meets one of the two.
 
 ```sh
-migrator status          # see what the database thinks it has
-migrator mark Init1748693000572
-migrator up
+migrator status                        # see what the database thinks it has
+migrator mark Init1748693000572        # one of them
+migrator mark --to Db211726134867498   # everything up to and including this one
+migrator mark                          # all of them
+migrator up                            # and run whatever is left
 ```
 
 `status` also lists what the ledger holds that the build does not, which is how an

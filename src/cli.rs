@@ -15,6 +15,7 @@ migrator <command>
   up [--to NAME]          apply everything pending, or stop after NAME
   down [--steps N]        take the last migration back, or the last N
   mark [NAME]             record as applied without running - for a schema that already has it
+  mark --to NAME          the same, for everything pending up to and including NAME
   unmark NAME             drop the ledger row without running the down
   verify                  report files edited after the database ran them
   create SLUG             write a new .up.sql / .down.sql pair into the checkout
@@ -22,11 +23,28 @@ migrator <command>
   --dry-run               with up or down: print the sql instead of running it
 ";
 
+/// The command line owns its strings; `Marking` borrows them.
+pub enum Marking {
+    All,
+    One(String),
+    Through(String),
+}
+
+impl Marking {
+    fn borrowed(&self) -> crate::Marking<'_> {
+        match self {
+            Marking::All => crate::Marking::All,
+            Marking::One(name) => crate::Marking::One(name),
+            Marking::Through(name) => crate::Marking::Through(name),
+        }
+    }
+}
+
 pub enum Command {
     Status,
     Up { target: Option<String>, dry_run: bool },
     Down { steps: usize, dry_run: bool },
-    Mark { target: Option<String> },
+    Mark { marking: Marking },
     Unmark { name: String },
     Verify,
     Create { slug: String },
@@ -76,7 +94,11 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command> {
             dry_run,
         },
         "mark" => Command::Mark {
-            target: positional.first().cloned(),
+            marking: match (target, positional.first().cloned()) {
+                (Some(through), _) => Marking::Through(through),
+                (None, Some(one)) => Marking::One(one),
+                (None, None) => Marking::All,
+            },
         },
         "unmark" => Command::Unmark {
             name: positional
@@ -145,8 +167,8 @@ impl Command {
 
                 Ok(())
             }
-            Command::Mark { target } => {
-                migrations.mark(db, target.as_deref()).await?;
+            Command::Mark { marking } => {
+                migrations.mark(db, marking.borrowed()).await?;
 
                 Ok(())
             }

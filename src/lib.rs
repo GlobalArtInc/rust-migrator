@@ -166,13 +166,23 @@ impl Migrations {
     /// Records migrations as applied without running them. This is for a schema
     /// that already has the change - a database somebody built by hand, or one
     /// where the history was lost while the rows stayed.
-    pub async fn mark(&self, db: &DatabaseConnection, target: Option<&str>) -> Result<Vec<String>> {
+    pub async fn mark(&self, db: &DatabaseConnection, marking: Marking<'_>) -> Result<Vec<String>> {
         self.locked(db, |db| async move {
             let done = ledger::applied(db, self.table).await?;
+            let carried = self.all()?;
+
+            if let Marking::One(target) | Marking::Through(target) = marking {
+                if !carried.iter().any(|migration| migration.name == target) {
+                    return Err(Error::Unknown {
+                        name: target.to_owned(),
+                    });
+                }
+            }
+
             let mut marked = Vec::new();
 
-            for migration in pending(self.all()?, &done) {
-                if target.is_some_and(|target| target != migration.name) {
+            for migration in pending(carried, &done) {
+                if matches!(marking, Marking::One(target) if target != migration.name) {
                     continue;
                 }
 
@@ -191,16 +201,17 @@ impl Migrations {
                 txn.commit().await.map_err(Error::database("a commit"))?;
 
                 tracing::info!(migration = migration.name, "marked as applied without running it");
-                marked.push(migration.name);
-            }
 
-            if let Some(target) = target {
-                if marked.is_empty() {
-                    return Err(Error::Unknown {
-                        name: target.to_owned(),
-                    });
+                let last = matches!(marking, Marking::One(_))
+                    || matches!(marking, Marking::Through(target) if target == migration.name);
+                marked.push(migration.name);
+
+                if last {
+                    break;
                 }
             }
+
+            tracing::info!(marked = marked.len(), "recorded without running them");
 
             Ok(marked)
         })
@@ -351,6 +362,17 @@ fn pending(carried: Vec<Migration>, done: &[String]) -> Vec<Migration> {
         .into_iter()
         .filter(|migration| !done.iter().any(|name| name == &migration.name))
         .collect()
+}
+
+/// Which of the pending migrations `mark` should record.
+#[derive(Clone, Copy)]
+pub enum Marking<'a> {
+    All,
+    /// Just this one.
+    One(&'a str),
+    /// Everything up to and including this one, which is what a schema built
+    /// before the history was written usually needs.
+    Through(&'a str),
 }
 
 pub struct Status {
