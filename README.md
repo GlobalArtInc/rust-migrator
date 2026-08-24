@@ -9,7 +9,7 @@ keeps.
 
 ```toml
 [dependencies]
-migrator = { package = "sqlmig", version = "0.1" }
+migrator = { package = "sqlmig", version = "0.2" }
 ```
 
 The crate is `sqlmig` on crates.io; `migrator` is what it is called at the call
@@ -31,6 +31,12 @@ Replicas start together and each of them applies what is missing. They take one
 advisory lock, so the first one through does the work and the rest wait and then
 find nothing left to do. A migration that fails takes the start with it: a
 service against a half-built schema answers wrongly rather than not at all.
+
+The lock is a session lock on a connection of its own, not a transaction lock.
+A transaction would do for the lock, but it also holds a snapshot open, and
+`CREATE INDEX CONCURRENTLY` waits for every transaction older than itself before
+it will build — so the one migration that most needs to run outside a
+transaction would wait on the very lock that is letting it run.
 
 ## As a binary
 
@@ -193,7 +199,7 @@ tool existed carry no checksum and are reported as such, not as a failure.
 migrator::embed!("$CARGO_MANIFEST_DIR/../../migrations")
     .table("migrations")     // the ledger, unless typeorm was told otherwise
     .lock_key(6113251907444282112)
-    .lock_wait("150s")       // how long a start waits behind another one
+    .lock_wait(Duration::from_secs(150))  // how long a start waits behind another one
 ```
 
 ## Tests

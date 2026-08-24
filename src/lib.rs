@@ -6,6 +6,7 @@
 
 use std::future::Future;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use include_dir::Dir;
 use sea_orm::{ConnectionTrait, DatabaseConnection, TransactionTrait};
@@ -38,7 +39,7 @@ pub struct Migrations {
     manifest: &'static str,
     table: &'static str,
     lock_key: i64,
-    lock_wait: &'static str,
+    lock_wait: Duration,
 }
 
 /// Every service on a database takes the same lock, so replicas starting together
@@ -49,7 +50,7 @@ const LOCK_KEY: i64 = 6_113_251_907_444_282_112;
 /// Long enough for the slowest migration somebody else is running, short enough
 /// that a lock nobody will release ends the start with a message instead of
 /// leaving the service silent behind a port that never opens.
-const LOCK_WAIT: &str = "150s";
+const LOCK_WAIT: Duration = Duration::from_secs(150);
 
 impl Migrations {
     #[doc(hidden)]
@@ -92,7 +93,7 @@ impl Migrations {
     }
 
     /// How long a start will wait behind another one before giving up.
-    pub fn lock_wait(mut self, wait: &'static str) -> Self {
+    pub fn lock_wait(mut self, wait: Duration) -> Self {
         self.lock_wait = wait;
         self
     }
@@ -350,10 +351,17 @@ impl Migrations {
         Ok(())
     }
 
-    /// The lock has to be held by a transaction rather than by the session: the
-    /// pool hands each statement to whichever connection is free, so a session
-    /// lock would be released on a different connection than it was taken on -
-    /// which releases nothing and leaves every other service waiting for good.
+    /// Holds the migration lock on a connection of its own, taken out of the
+    /// pool and kept until the work is done.
+    ///
+    /// It has to be a connection rather than a transaction. A transaction would
+    /// do for the lock, but it also holds a snapshot open, and `CREATE INDEX
+    /// CONCURRENTLY` waits for every transaction older than itself before it
+    /// will build - so the migration that most needs to run outside a
+    /// transaction would wait on the lock that is letting it run. It also has to
+    /// be a pinned connection rather than the pool: the pool hands each
+    /// statement to whichever connection is free, and a lock released on a
+    /// different connection than it was taken on releases nothing.
     async fn locked<'a, T, F, Fut>(&'a self, db: &'a DatabaseConnection, work: F) -> Result<T>
     where
         F: FnOnce(&'a DatabaseConnection) -> Fut,
@@ -361,18 +369,35 @@ impl Migrations {
     {
         ledger::ensure(db, self.table).await?;
 
-        let guard = db.begin().await.map_err(Error::database("a transaction"))?;
-        guard
-            .execute_unprepared(&format!(
-                "SET LOCAL lock_timeout = '{}'; SELECT pg_advisory_xact_lock({})",
-                self.lock_wait, self.lock_key
-            ))
+        let mut guard = db
+            .get_postgres_connection_pool()
+            .acquire()
             .await
-            .map_err(Error::database("the migration lock"))?;
+            .map_err(|source| Error::Database {
+                action: "a connection for the lock",
+                source: sea_orm::DbErr::Conn(sea_orm::RuntimeErr::SqlxError(source)),
+            })?;
+
+        // long enough for the slowest migration somebody else is running, short
+        // enough that a lock nobody will release ends the start with a message
+        // instead of leaving the service silent behind a port that never opens
+        let take = format!(
+            "SET lock_timeout = '{}ms'; SELECT pg_advisory_lock({}); RESET lock_timeout",
+            self.lock_wait.as_millis(),
+            self.lock_key
+        );
+        sea_orm::sqlx::raw_sql(&take)
+            .execute(&mut *guard)
+            .await
+            .map_err(|source| Error::Database {
+                action: "the migration lock",
+                source: sea_orm::DbErr::Conn(sea_orm::RuntimeErr::SqlxError(source)),
+            })?;
 
         let result = work(db).await;
 
-        guard.commit().await.map_err(Error::database("releasing the lock"))?;
+        let release = format!("SELECT pg_advisory_unlock({})", self.lock_key);
+        let _ = sea_orm::sqlx::raw_sql(&release).execute(&mut *guard).await;
 
         result
     }

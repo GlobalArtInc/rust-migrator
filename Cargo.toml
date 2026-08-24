@@ -1,6 +1,6 @@
 [package]
 name = "sqlmig"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.94"
 description = "SQL migrations for Rust services, on the table TypeORM left behind"
@@ -16,17 +16,11 @@ name = "sqlmig"
 required-features = ["bin"]
 
 [features]
-bin = [
-    "dep:tokio",
-    "dep:tracing-subscriber",
-    "sea-orm/sqlx-postgres",
-    "sea-orm/runtime-tokio-rustls",
-    "sea-orm/macros",
-]
+bin = ["dep:tokio", "dep:tracing-subscriber"]
 
 [dependencies]
 include_dir = "0.7.4"
-sea-orm = { version = "1.1", default-features = false }
+sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls"] }
 sha2 = "0.10.9"
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"], optional = true }
