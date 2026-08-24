@@ -1,5 +1,6 @@
-# Публикация в crates.io. Версия берётся из Cargo.toml, тег - только повод.
-name: Публикация
+# Publishes to crates.io. The version comes from Cargo.toml; the tag is only the
+# occasion.
+name: Publish
 
 on:
   push:
@@ -9,7 +10,7 @@ on:
       dry_run:
         type: boolean
         default: true
-        description: "Собрать и проверить пакет, не публикуя."
+        description: "Build and check the package without publishing it."
 
 jobs:
   publish:
