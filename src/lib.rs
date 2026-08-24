@@ -81,6 +81,12 @@ impl Migrations {
         self
     }
 
+    /// The name of the ledger table, so a build can be checked against the one
+    /// the database actually keeps.
+    pub const fn ledger(&self) -> &'static str {
+        self.table
+    }
+
     /// Everything the binary carries, oldest first.
     pub fn all(&self) -> Result<Vec<Migration>> {
         discover::all(self.dir)
