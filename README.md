@@ -96,9 +96,35 @@ jobs:
 the two that differ between our services are read, so the same job definition
 works against any of them.
 
-The migrations reach `/migrations` however the deployment likes: a ConfigMap for
-a small history, or an init container built from the repository's own SQL for one
-that has outgrown a ConfigMap's megabyte.
+The migrations reach `/migrations` however the deployment likes. What our own
+services do is ship the schema as an image of its own — busybox with the `.sql`
+files in it, a couple of megabytes — and copy it out in an init container:
+
+```dockerfile
+# Dockerfile.migrations, in the application's repository
+FROM busybox:stable
+COPY src/migrations/ /migrations/
+```
+
+```yaml
+initContainers:
+- name: schema
+  image: registry/app:migrations-<tag>
+  command: ["sh", "-c", "cp -a /migrations/. /shared/"]
+  volumeMounts:
+  - name: migrations
+    mountPath: /shared
+volumeMounts:
+- name: migrations
+  mountPath: /migrations
+volumes:
+- name: migrations
+  emptyDir: {}
+```
+
+The sql is then versioned with the commit that wrote it, and the migrator is
+upgraded once for everybody. A ConfigMap works too and is less to set up, but it
+holds a megabyte and a long history outgrows that.
 
 ## The files
 
