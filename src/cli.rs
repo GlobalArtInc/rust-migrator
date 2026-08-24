@@ -265,9 +265,45 @@ pub fn report<E: std::fmt::Display>(result: std::result::Result<(), E>) -> ExitC
         Err(error) => {
             // the alternate form is what unwinds an anyhow chain; without it only
             // the outermost context survives and the cause is lost
-            tracing::error!(error = format!("{error:#}"), "the migrator stopped");
+            tracing::error!(error = whole(&format!("{error:#}")), "the migrator stopped");
 
             ExitCode::FAILURE
         }
+    }
+}
+
+/// A database error carries its own source in its message, and unwinding the
+/// chain on top of that says the same thing four times over. Consecutive parts
+/// that repeat are dropped; nothing else is touched.
+fn whole(chain: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+
+    for part in chain.split(": ") {
+        if parts.last() != Some(&part) {
+            parts.push(part);
+        }
+    }
+
+    parts.join(": ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::whole;
+
+    #[test]
+    fn a_cause_that_repeats_is_said_once() {
+        assert_eq!(
+            whole("Init failed: Execution Error: no such relation: no such relation: no such relation"),
+            "Init failed: Execution Error: no such relation"
+        );
+    }
+
+    #[test]
+    fn a_chain_that_says_something_new_each_time_is_left_alone() {
+        assert_eq!(
+            whole("failed to connect: no route to host"),
+            "failed to connect: no route to host"
+        );
     }
 }
