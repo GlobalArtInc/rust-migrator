@@ -273,13 +273,13 @@ pub fn report<E: std::fmt::Display>(result: std::result::Result<(), E>) -> ExitC
 }
 
 /// A database error carries its own source in its message, and unwinding the
-/// chain on top of that says the same thing four times over. Consecutive parts
-/// that repeat are dropped; nothing else is touched.
+/// chain on top of that says the same thing four times over. A part that has
+/// already been said is dropped; the order of the rest is kept.
 fn whole(chain: &str) -> String {
     let mut parts: Vec<&str> = Vec::new();
 
     for part in chain.split(": ") {
-        if parts.last() != Some(&part) {
+        if !parts.contains(&part) {
             parts.push(part);
         }
     }
@@ -293,9 +293,14 @@ mod tests {
 
     #[test]
     fn a_cause_that_repeats_is_said_once() {
+        // this is what sea-orm and anyhow together make of one missing table
         assert_eq!(
-            whole("Init failed: Execution Error: no such relation: no such relation: no such relation"),
-            "Init failed: Execution Error: no such relation"
+            whole(
+                "Init failed: Execution Error: error returned from database: no such relation: \
+                 Execution Error: error returned from database: no such relation: \
+                 error returned from database: no such relation: no such relation"
+            ),
+            "Init failed: Execution Error: error returned from database: no such relation"
         );
     }
 
