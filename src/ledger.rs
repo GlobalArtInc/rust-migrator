@@ -5,12 +5,21 @@ use crate::error::{Error, Result};
 /// The table typeorm wrote, kept exactly as it was: these services were node
 /// services first, and their databases still hold the rows it left.
 pub(crate) fn create(table: &str) -> String {
+    // typeorm's own name for the constraint on its own table, so a database that
+    // gets its ledger from here looks like one that got it from typeorm. A table
+    // under any other name takes a name of its own: constraint names are unique
+    // across the schema, and two ledgers cannot both be that one.
+    let key = match table {
+        "migrations" => "PK_8c82d7f526340ab734260ea46be".to_owned(),
+        other => format!("PK_{other}"),
+    };
+
     format!(
         r#"CREATE TABLE IF NOT EXISTS "{table}" (
             "id" SERIAL NOT NULL,
             "timestamp" bigint NOT NULL,
             "name" character varying NOT NULL,
-            CONSTRAINT "PK_8c82d7f526340ab734260ea46be" PRIMARY KEY ("id")
+            CONSTRAINT "{key}" PRIMARY KEY ("id")
         );
         CREATE TABLE IF NOT EXISTS "{table}_checksum" (
             "name" character varying NOT NULL,

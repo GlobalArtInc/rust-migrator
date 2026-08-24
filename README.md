@@ -73,6 +73,33 @@ migrator create SLUG             write a new pair into the checkout
 migrator up --dry-run            print the sql instead of running it
 ```
 
+## As an image
+
+`globalartltd/sqlmig` carries no schema of its own: the files come off a mount,
+so one tag runs every database. This is what a Flux job uses.
+
+```yaml
+jobs:
+  migrate:
+    image: globalartltd/sqlmig:latest
+    args: ["up"]
+    env:
+      MIGRATIONS_DIR: /migrations       # where the pairs are mounted
+      MIGRATIONS_TABLE: migrations      # the ledger
+    envFrom:
+    - secret: app-env                   # DB_HOST, DB_USER, DB_PASS, DB_NAME, ...
+```
+
+`DATABASE_URL` is read whole if it is set. Otherwise the pieces: `DB_HOST`,
+`DB_PORT` (5432), `DB_USER`, `DB_PASS` or `DB_PASSWORD`, `DB_NAME` or
+`DB_DATABASE`, and optionally `DB_SCHEMA` and `DB_SSL_MODE` — both spellings of
+the two that differ between our services are read, so the same job definition
+works against any of them.
+
+The migrations reach `/migrations` however the deployment likes: a ConfigMap for
+a small history, or an init container built from the repository's own SQL for one
+that has outgrown a ConfigMap's megabyte.
+
 ## The files
 
 ```

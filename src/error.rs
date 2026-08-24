@@ -36,6 +36,9 @@ pub enum Error {
     #[error("the migrations directory is not on disk at {path}; create only works in a checkout")]
     NotACheckout { path: String },
 
+    #[error("there is no migrations directory at {path}")]
+    NoDirectory { path: String },
+
     #[error("{path} already exists")]
     Exists { path: String },
 

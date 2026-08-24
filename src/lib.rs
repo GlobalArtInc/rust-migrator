@@ -10,6 +10,8 @@ use std::path::PathBuf;
 use include_dir::Dir;
 use sea_orm::{ConnectionTrait, DatabaseConnection, TransactionTrait};
 
+use discover::Files;
+
 mod discover;
 mod error;
 mod ledger;
@@ -31,7 +33,7 @@ pub mod export {
 /// static MIGRATIONS: Migrations = migrator::embed!("$CARGO_MANIFEST_DIR/../../migrations");
 /// ```
 pub struct Migrations {
-    dir: &'static Dir<'static>,
+    files: Files,
     source: &'static str,
     manifest: &'static str,
     table: &'static str,
@@ -53,7 +55,7 @@ impl Migrations {
     #[doc(hidden)]
     pub const fn new(dir: &'static Dir<'static>, source: &'static str, manifest: &'static str) -> Self {
         Self {
-            dir,
+            files: Files::Embedded(dir),
             source,
             manifest,
             table: "migrations",
@@ -62,21 +64,35 @@ impl Migrations {
         }
     }
 
+    /// Reads the files off disk instead of carrying them. This is for the image
+    /// that runs nothing but the migrator: it is one image for every schema and
+    /// cannot have been built with any of them.
+    pub fn from_dir(directory: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            files: Files::OnDisk(directory.into()),
+            source: "",
+            manifest: "",
+            table: "migrations",
+            lock_key: LOCK_KEY,
+            lock_wait: LOCK_WAIT,
+        }
+    }
+
     /// The ledger table. `migrations` unless typeorm was told otherwise.
-    pub const fn table(mut self, table: &'static str) -> Self {
+    pub fn table(mut self, table: &'static str) -> Self {
         self.table = table;
         self
     }
 
     /// Only worth changing when two schemas share one database and should not
     /// wait on each other.
-    pub const fn lock_key(mut self, key: i64) -> Self {
+    pub fn lock_key(mut self, key: i64) -> Self {
         self.lock_key = key;
         self
     }
 
     /// How long a start will wait behind another one before giving up.
-    pub const fn lock_wait(mut self, wait: &'static str) -> Self {
+    pub fn lock_wait(mut self, wait: &'static str) -> Self {
         self.lock_wait = wait;
         self
     }
@@ -89,12 +105,16 @@ impl Migrations {
 
     /// Everything the binary carries, oldest first.
     pub fn all(&self) -> Result<Vec<Migration>> {
-        discover::all(self.dir)
+        discover::all(&self.files)
     }
 
     /// Where the files live in a checkout. Only meaningful on the machine the
     /// binary was built on, which is where new migrations get written.
     pub fn source(&self) -> PathBuf {
+        if let Files::OnDisk(path) = &self.files {
+            return path.clone();
+        }
+
         match self.source.strip_prefix("$CARGO_MANIFEST_DIR") {
             Some(rest) => PathBuf::from(self.manifest).join(rest.trim_start_matches(['/', '\\'])),
             None => PathBuf::from(self.source),
@@ -126,7 +146,7 @@ impl Migrations {
             for migration in pending(carried, &done) {
                 let last = target == Some(migration.name.as_str());
 
-                self.run(db, &migration, migration.up, true).await?;
+                self.run(db, &migration, &migration.up.clone(), true).await?;
                 tracing::info!(migration = migration.name, "applied a migration");
                 ran.push(migration.name);
 
@@ -157,6 +177,7 @@ impl Migrations {
                     .ok_or(Error::Unknown { name: name.clone() })?;
                 let down = migration
                     .down
+                    .as_deref()
                     .ok_or_else(|| Error::Irreversible { name: name.clone() })?;
 
                 self.run(db, migration, down, false).await?;

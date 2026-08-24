@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use include_dir::Dir;
 
 use crate::error::{Error, Result};
@@ -8,8 +10,16 @@ use crate::error::{Error, Result};
 pub struct Migration {
     pub stamp: i64,
     pub name: String,
-    pub up: &'static str,
-    pub down: Option<&'static str>,
+    pub up: String,
+    pub down: Option<String>,
+}
+
+/// Where the files come from. A service carries them inside itself; the image
+/// that runs nothing but the migrator reads them off a mount, because it is one
+/// image for every schema and cannot have been built with any of them.
+pub(crate) enum Files {
+    Embedded(&'static Dir<'static>),
+    OnDisk(PathBuf),
 }
 
 impl Migration {
@@ -41,43 +51,11 @@ pub(crate) const DIRECTIVE: &str = "migrator:no-transaction";
 /// Reads the directory the binary carries. Files that are not `.up.sql` are passed
 /// over, so a README next to the migrations is no trouble, but a `.down.sql` with
 /// nothing in front of it is: it means the pair was split.
-pub(crate) fn all(dir: &'static Dir<'static>) -> Result<Vec<Migration>> {
-    let mut found: Vec<Migration> = Vec::new();
-
-    for file in dir.files() {
-        let Some(file_name) = file.path().file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-
-        let Some(stem) = file_name.strip_suffix(".up.sql") else {
-            if file_name.ends_with(".down.sql") {
-                let up = file_name.replace(".down.sql", ".up.sql");
-                if dir.get_file(dir.path().join(&up)).is_none() {
-                    return Err(Error::Naming { file: up });
-                }
-            }
-
-            continue;
-        };
-
-        let (stamp, slug) = stem.split_once('-').ok_or_else(|| Error::Naming {
-            file: file_name.to_owned(),
-        })?;
-        let stamp: i64 = stamp.parse().map_err(|_| Error::Naming {
-            file: file_name.to_owned(),
-        })?;
-
-        found.push(Migration {
-            stamp,
-            name: format!("{}{stamp}", class_of(slug)),
-            up: file.contents_utf8().ok_or_else(|| Error::Encoding {
-                file: file_name.to_owned(),
-            })?,
-            down: dir
-                .get_file(dir.path().join(format!("{stem}.down.sql")))
-                .and_then(|file| file.contents_utf8()),
-        });
-    }
+pub(crate) fn all(files: &Files) -> Result<Vec<Migration>> {
+    let mut found = match files {
+        Files::Embedded(dir) => embedded(dir)?,
+        Files::OnDisk(path) => on_disk(path)?,
+    };
 
     // typeorm ordered by the stamp alone and let the directory listing settle the
     // ties, which happened to be by name; two files that resolve to one name are
@@ -93,6 +71,104 @@ pub(crate) fn all(dir: &'static Dir<'static>) -> Result<Vec<Migration>> {
     }
 
     Ok(found)
+}
+
+fn embedded(dir: &'static Dir<'static>) -> Result<Vec<Migration>> {
+    let mut found = Vec::new();
+
+    for file in dir.files() {
+        let Some(file_name) = file.path().file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let Some(stem) = pair_of(file_name, |down| dir.get_file(dir.path().join(down)).is_some())? else {
+            continue;
+        };
+
+        found.push(read(
+            file_name,
+            stem,
+            || {
+                file.contents_utf8().map(str::to_owned).ok_or(Error::Encoding {
+                    file: file_name.to_owned(),
+                })
+            },
+            || {
+                dir.get_file(dir.path().join(format!("{stem}.down.sql")))
+                    .and_then(|file| file.contents_utf8())
+                    .map(str::to_owned)
+            },
+        )?);
+    }
+
+    Ok(found)
+}
+
+fn on_disk(directory: &Path) -> Result<Vec<Migration>> {
+    let mut found = Vec::new();
+    let entries = std::fs::read_dir(directory).map_err(|_| Error::NoDirectory {
+        path: directory.display().to_string(),
+    })?;
+
+    for entry in entries.flatten() {
+        let file_name = entry.file_name().to_string_lossy().into_owned();
+        let Some(stem) = pair_of(&file_name, |down| directory.join(down).is_file())? else {
+            continue;
+        };
+
+        let stem = stem.to_owned();
+        found.push(read(
+            &file_name,
+            &stem,
+            || {
+                std::fs::read_to_string(entry.path()).map_err(|_| Error::Encoding {
+                    file: file_name.clone(),
+                })
+            },
+            || std::fs::read_to_string(directory.join(format!("{stem}.down.sql"))).ok(),
+        )?);
+    }
+
+    Ok(found)
+}
+
+/// Files that are not `.up.sql` are passed over, so a README next to the
+/// migrations is no trouble. A `.down.sql` with nothing in front of it is: it
+/// means the pair was split.
+fn pair_of<'a>(file_name: &'a str, has: impl Fn(&str) -> bool) -> Result<Option<&'a str>> {
+    match file_name.strip_suffix(".up.sql") {
+        Some(stem) => Ok(Some(stem)),
+        None => {
+            if file_name.ends_with(".down.sql") {
+                let up = file_name.replace(".down.sql", ".up.sql");
+                if !has(&up) {
+                    return Err(Error::Naming { file: up });
+                }
+            }
+
+            Ok(None)
+        }
+    }
+}
+
+fn read(
+    file_name: &str,
+    stem: &str,
+    up: impl FnOnce() -> Result<String>,
+    down: impl FnOnce() -> Option<String>,
+) -> Result<Migration> {
+    let (stamp, slug) = stem.split_once('-').ok_or_else(|| Error::Naming {
+        file: file_name.to_owned(),
+    })?;
+    let stamp: i64 = stamp.parse().map_err(|_| Error::Naming {
+        file: file_name.to_owned(),
+    })?;
+
+    Ok(Migration {
+        stamp,
+        name: format!("{}{stamp}", class_of(slug)),
+        up: up()?,
+        down: down(),
+    })
 }
 
 /// The ledger holds the name of the class typeorm generated, so the slug is read

@@ -266,7 +266,7 @@ async fn plan_down(migrations: &Migrations, db: &DatabaseConnection, steps: usiz
         let Some(migration) = carried.iter().find(|migration| migration.name == entry.name) else {
             continue;
         };
-        let Some(down) = migration.down else {
+        let Some(down) = migration.down.as_deref() else {
             return Err(Error::Irreversible {
                 name: migration.name.clone(),
             });
