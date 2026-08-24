@@ -263,7 +263,9 @@ pub fn report<E: std::fmt::Display>(result: std::result::Result<(), E>) -> ExitC
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            tracing::error!(error = %error, "the migrator stopped");
+            // the alternate form is what unwinds an anyhow chain; without it only
+            // the outermost context survives and the cause is lost
+            tracing::error!(error = format!("{error:#}"), "the migrator stopped");
 
             ExitCode::FAILURE
         }
