@@ -4,7 +4,7 @@ name: Image
 
 on:
   push:
-    branches: [master]
+    branches: [main]
     paths:
       - src/**
       - Cargo.toml
