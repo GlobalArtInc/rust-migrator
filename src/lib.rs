@@ -80,20 +80,20 @@ impl Migrations {
     }
 
     /// The ledger table. `migrations` unless typeorm was told otherwise.
-    pub fn table(mut self, table: &'static str) -> Self {
+    pub const fn table(mut self, table: &'static str) -> Self {
         self.table = table;
         self
     }
 
     /// Only worth changing when two schemas share one database and should not
     /// wait on each other.
-    pub fn lock_key(mut self, key: i64) -> Self {
+    pub const fn lock_key(mut self, key: i64) -> Self {
         self.lock_key = key;
         self
     }
 
     /// How long a start will wait behind another one before giving up.
-    pub fn lock_wait(mut self, wait: Duration) -> Self {
+    pub const fn lock_wait(mut self, wait: Duration) -> Self {
         self.lock_wait = wait;
         self
     }

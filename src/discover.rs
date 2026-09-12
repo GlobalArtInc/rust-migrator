@@ -134,7 +134,7 @@ fn on_disk(directory: &Path) -> Result<Vec<Migration>> {
 /// Files that are not `.up.sql` are passed over, so a README next to the
 /// migrations is no trouble. A `.down.sql` with nothing in front of it is: it
 /// means the pair was split.
-fn pair_of<'a>(file_name: &'a str, has: impl Fn(&str) -> bool) -> Result<Option<&'a str>> {
+fn pair_of(file_name: &str, has: impl Fn(&str) -> bool) -> Result<Option<&str>> {
     match file_name.strip_suffix(".up.sql") {
         Some(stem) => Ok(Some(stem)),
         None => {
